@@ -1,0 +1,30 @@
+appId: com.hahali.highlight-translator
+productName: 划词翻译
+executableName: highlight-translator
+directories:
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - node_modules/selection-hook/**/*
+  - node_modules/node-gyp-build/**/*
+asar: true
+asarUnpack:
+  - "**/node_modules/selection-hook/**/*"
+npmRebuild: false
+win:
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: dir
+      arch:
+        - x64
+nsis:
+  artifactName: "HighlightTranslator-Setup-${version}.${ext}"
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 划词翻译

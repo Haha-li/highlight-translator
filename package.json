@@ -1,11 +1,13 @@
 {
   "name": "highlight-translator",
   "version": "0.1.0",
+  "author": "Haha-li",
   "description": "Standalone desktop selection translator",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "node scripts/launch.mjs dev",
     "build": "electron-vite build",
+    "dist": "npm run build && electron-builder --win",
     "start": "node scripts/launch.mjs start",
     "smoke": "node scripts/launch.mjs start --smoke-test",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -22,6 +24,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
