@@ -2,6 +2,7 @@
   "name": "highlight-translator",
   "version": "0.2.0",
   "author": "Haha-li",
+  "license": "MIT",
   "description": "Standalone desktop selection translator",
   "main": "./out/main/index.js",
   "scripts": {
