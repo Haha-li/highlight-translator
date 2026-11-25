@@ -1,36 +1,38 @@
 import { describe, expect, it } from 'vitest'
-import { computePopupPosition, physicalToDip } from '../src/shared/positioning'
-import type { DisplayMetrics } from '../src/shared/types'
+import { computePopupPosition } from '../src/shared/positioning'
+import type { Rect } from '../src/shared/types'
 
-describe('positioning', () => {
-  const display150: DisplayMetrics = {
-    workArea: { x: 0, y: 0, width: 1280, height: 720 },
-    scaleFactor: 1.5
-  }
+describe('positioning in DIP coordinates', () => {
+  const workArea: Rect = { x: 0, y: 0, width: 1280, height: 720 }
 
-  it('converts physical coordinates to DIP coordinates using scaleFactor', () => {
-    const dip = physicalToDip({ x: 300, y: 450 }, 1.5)
-    expect(dip).toEqual({ x: 200, y: 300 })
-  })
-
-  it('places popup slightly below-right of cursor when space is sufficient', () => {
+  it('places popup slightly below-right of DIP anchor when space is sufficient', () => {
     const pos = computePopupPosition(
       { x: 300, y: 300 },
       { width: 36, height: 36 },
-      display150
+      workArea
     )
-    expect(pos).toEqual({ x: 208, y: 208 })
+    expect(pos).toEqual({ x: 310, y: 312 })
   })
 
-  it('flips or clamps popup inside workArea when near right and bottom edges', () => {
+  it('flips popup above anchor when near bottom edge so selected line is not covered', () => {
     const pos = computePopupPosition(
-      { x: 1900, y: 1060 },
-      { width: 380, height: 260 },
-      display150
+      { x: 400, y: 680 },
+      { width: 380, height: 310 },
+      workArea
     )
-    expect(pos.x + 380).toBeLessThanOrEqual(display150.workArea.x + display150.workArea.width)
-    expect(pos.y + 260).toBeLessThanOrEqual(display150.workArea.y + display150.workArea.height)
-    expect(pos.x).toBeGreaterThanOrEqual(display150.workArea.x)
-    expect(pos.y).toBeGreaterThanOrEqual(display150.workArea.y)
+    expect(pos.y).toBe(680 - 310 - 10)
+    expect(pos.x).toBe(410)
+  })
+
+  it('clamps popup inside workArea on multi-monitor negative or offset coordinates', () => {
+    const secondaryWorkArea: Rect = { x: -1920, y: 0, width: 1920, height: 1040 }
+    const pos = computePopupPosition(
+      { x: -50, y: 980 },
+      { width: 380, height: 310 },
+      secondaryWorkArea
+    )
+    expect(pos.x + 380).toBeLessThanOrEqual(secondaryWorkArea.x + secondaryWorkArea.width)
+    expect(pos.x).toBeGreaterThanOrEqual(secondaryWorkArea.x)
+    expect(pos.y).toBe(980 - 310 - 10)
   })
 })

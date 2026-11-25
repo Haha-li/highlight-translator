@@ -1,9 +1,8 @@
 import { join } from 'node:path'
 import { BrowserWindow, screen } from 'electron'
-import { computePopupPosition, physicalToDip } from '../shared/positioning'
+import { computePopupPosition } from '../shared/positioning'
 import {
   IPC_CHANNELS,
-  type DisplayMetrics,
   type Point,
   type SelectionPayload,
   type Size,
@@ -11,9 +10,10 @@ import {
   type TranslatorConfig
 } from '../shared/types'
 
-const TOOLBAR_SIZE: Size = { width: 42, height: 42 }
+const TOOLBAR_SIZE: Size = { width: 34, height: 34 }
 const TRANSLATE_SIZE: Size = { width: 380, height: 310 }
 const SETTINGS_SIZE: Size = { width: 520, height: 640 }
+const IDLE_RECLAIM_MS = 25000
 
 function loadRendererPage(win: BrowserWindow, htmlFile: string): void {
   const devUrl = process.env.ELECTRON_RENDERER_URL
@@ -24,14 +24,19 @@ function loadRendererPage(win: BrowserWindow, htmlFile: string): void {
   void win.loadFile(join(__dirname, `../renderer/${htmlFile}`))
 }
 
-function getDisplayForPhysicalPoint(physicalPoint: Point): DisplayMetrics {
-  const primaryScale = screen.getPrimaryDisplay().scaleFactor
-  const approxDip = physicalToDip(physicalPoint, primaryScale)
-  const display = screen.getDisplayNearestPoint(approxDip)
-  return {
-    workArea: display.workArea,
-    scaleFactor: display.scaleFactor
+function applyPopupBounds(win: BrowserWindow, dipAnchor: Point, size: Size, focus: boolean): void {
+  const display = screen.getDisplayNearestPoint(dipAnchor)
+  const pos = computePopupPosition(dipAnchor, size, display.workArea)
+  const targetBounds = { x: pos.x, y: pos.y, width: size.width, height: size.height }
+  win.setBounds(targetBounds)
+  if (focus) {
+    win.show()
+    win.focus()
+  } else {
+    win.showInactive()
   }
+  // Re-apply bounds after show to prevent Windows cross-DPI monitor scaling drift
+  win.setBounds(targetBounds)
 }
 
 export class WindowManager {
@@ -40,6 +45,7 @@ export class WindowManager {
   private settingsWin: BrowserWindow | null = null
   private latestSelection: SelectionPayload | null = null
   private isTranslatePinned = false
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onTranslateBlurClose: () => void
 
   constructor(onTranslateBlurClose: () => void) {
@@ -50,6 +56,42 @@ export class WindowManager {
     return join(__dirname, '../preload/index.js')
   }
 
+  private cancelIdleReclaim(): void {
+    if (!this.idleTimer) {
+      return
+    }
+    clearTimeout(this.idleTimer)
+    this.idleTimer = null
+  }
+
+  private scheduleIdleReclaim(): void {
+    this.cancelIdleReclaim()
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      this.reclaimHiddenPopups()
+    }, IDLE_RECLAIM_MS)
+  }
+
+  private reclaimHiddenPopups(): void {
+    const toolbarVisible = Boolean(
+      this.toolbarWin && !this.toolbarWin.isDestroyed() && this.toolbarWin.isVisible()
+    )
+    const translateVisible = Boolean(
+      this.translateWin && !this.translateWin.isDestroyed() && this.translateWin.isVisible()
+    )
+    if (toolbarVisible || translateVisible) {
+      return
+    }
+    if (this.toolbarWin && !this.toolbarWin.isDestroyed()) {
+      this.toolbarWin.destroy()
+      this.toolbarWin = null
+    }
+    if (this.translateWin && !this.translateWin.isDestroyed()) {
+      this.translateWin.destroy()
+      this.translateWin = null
+    }
+  }
+
   private ensureToolbarWindow(): BrowserWindow {
     if (this.toolbarWin && !this.toolbarWin.isDestroyed()) {
       return this.toolbarWin
@@ -58,18 +100,19 @@ export class WindowManager {
       width: TOOLBAR_SIZE.width,
       height: TOOLBAR_SIZE.height,
       frame: false,
-      transparent: true,
       resizable: false,
       movable: false,
       focusable: false,
       skipTaskbar: true,
       alwaysOnTop: true,
+      roundedCorners: true,
       show: false,
-      hasShadow: false,
+      backgroundColor: '#1e2028',
       webPreferences: {
         preload: this.preloadPath(),
         contextIsolation: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        spellcheck: false
       }
     })
     win.setAlwaysOnTop(true, 'screen-saver')
@@ -88,15 +131,17 @@ export class WindowManager {
       minWidth: 320,
       minHeight: 220,
       frame: false,
-      transparent: true,
       resizable: true,
       skipTaskbar: true,
       alwaysOnTop: true,
+      roundedCorners: true,
       show: false,
+      backgroundColor: '#1e2028',
       webPreferences: {
         preload: this.preloadPath(),
         contextIsolation: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        spellcheck: false
       }
     })
     win.setAlwaysOnTop(true, 'pop-up-menu')
@@ -106,6 +151,7 @@ export class WindowManager {
       }
       win.hide()
       this.onTranslateBlurClose()
+      this.scheduleIdleReclaim()
     })
     loadRendererPage(win, 'translate.html')
     this.translateWin = win
@@ -114,13 +160,23 @@ export class WindowManager {
 
   // not safe for concurrent calls: main-thread UI window operation only
   public showToolbar(payload: SelectionPayload): void {
+    this.cancelIdleReclaim()
     this.latestSelection = payload
     const win = this.ensureToolbarWindow()
-    const display = getDisplayForPhysicalPoint(payload.anchor)
-    const pos = computePopupPosition(payload.anchor, TOOLBAR_SIZE, display)
-    win.setBounds({ x: pos.x, y: pos.y, width: TOOLBAR_SIZE.width, height: TOOLBAR_SIZE.height })
-    win.showInactive()
-    win.webContents.send(IPC_CHANNELS.TOOLBAR_SHOW, payload)
+
+    const reveal = (): void => {
+      if (win.isDestroyed()) {
+        return
+      }
+      applyPopupBounds(win, payload.anchor, TOOLBAR_SIZE, false)
+      win.webContents.send(IPC_CHANNELS.TOOLBAR_SHOW, payload)
+    }
+
+    if (win.webContents.isLoading()) {
+      win.webContents.once('did-finish-load', reveal)
+      return
+    }
+    reveal()
   }
 
   public hideToolbar(): void {
@@ -128,20 +184,19 @@ export class WindowManager {
       return
     }
     this.toolbarWin.hide()
+    this.scheduleIdleReclaim()
   }
 
-  public isPointInsideToolbar(physicalPoint: Point): boolean {
+  public isDipPointInsideToolbar(dipPoint: Point): boolean {
     if (!this.toolbarWin || this.toolbarWin.isDestroyed() || !this.toolbarWin.isVisible()) {
       return false
     }
-    const display = getDisplayForPhysicalPoint(physicalPoint)
-    const dip = physicalToDip(physicalPoint, display.scaleFactor)
     const bounds = this.toolbarWin.getBounds()
     return (
-      dip.x >= bounds.x &&
-      dip.x <= bounds.x + bounds.width &&
-      dip.y >= bounds.y &&
-      dip.y <= bounds.y + bounds.height
+      dipPoint.x >= bounds.x &&
+      dipPoint.x <= bounds.x + bounds.width &&
+      dipPoint.y >= bounds.y &&
+      dipPoint.y <= bounds.y + bounds.height
     )
   }
 
@@ -154,18 +209,20 @@ export class WindowManager {
 
   // not safe for concurrent calls: main-thread UI window operation only
   public openTranslate(payload: SelectionPayload): void {
+    this.cancelIdleReclaim()
     this.latestSelection = payload
-    this.hideToolbar()
+    if (this.toolbarWin && !this.toolbarWin.isDestroyed() && this.toolbarWin.isVisible()) {
+      this.toolbarWin.hide()
+    }
     const win = this.ensureTranslateWindow()
-    const display = getDisplayForPhysicalPoint(payload.anchor)
     const currentBounds = win.getBounds()
     const targetSize: Size = { width: currentBounds.width, height: currentBounds.height }
-    const pos = computePopupPosition(payload.anchor, targetSize, display)
-    win.setPosition(pos.x, pos.y)
 
     const dispatchPayload = (): void => {
-      win.show()
-      win.focus()
+      if (win.isDestroyed()) {
+        return
+      }
+      applyPopupBounds(win, payload.anchor, targetSize, true)
       win.webContents.send(IPC_CHANNELS.TRANSLATE_OPEN, payload)
     }
 
@@ -187,6 +244,7 @@ export class WindowManager {
     this.isTranslatePinned = false
     this.translateWin.hide()
     this.onTranslateBlurClose()
+    this.scheduleIdleReclaim()
   }
 
   public sendStreamEvent(event: StreamEvent): void {
@@ -220,7 +278,8 @@ export class WindowManager {
       webPreferences: {
         preload: this.preloadPath(),
         contextIsolation: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        spellcheck: false
       }
     })
     loadRendererPage(win, 'settings.html')
@@ -230,12 +289,8 @@ export class WindowManager {
     this.settingsWin = win
   }
 
-  public warmUpFloatingWindows(): void {
-    this.ensureToolbarWindow()
-    this.ensureTranslateWindow()
-  }
-
   public destroyAll(): void {
+    this.cancelIdleReclaim()
     const list = [this.toolbarWin, this.translateWin, this.settingsWin]
     for (const win of list) {
       if (win && !win.isDestroyed()) {

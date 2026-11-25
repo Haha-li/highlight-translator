@@ -1,42 +1,49 @@
-import type { DisplayMetrics, Point, Size } from './types'
+import type { Point, Rect, Size } from './types'
 
-const CURSOR_OFFSET_DIP = 8
+const OFFSET_X_DIP = 10
+const OFFSET_Y_BELOW_DIP = 12
+const OFFSET_Y_ABOVE_DIP = 10
 const EDGE_PADDING_DIP = 8
 
-export function physicalToDip(point: Point, scaleFactor: number): Point {
-  if (scaleFactor <= 0) {
-    return { x: Math.round(point.x), y: Math.round(point.y) }
+function clampHorizontal(desiredX: number, width: number, workArea: Rect): number {
+  const minX = workArea.x + EDGE_PADDING_DIP
+  const maxX = workArea.x + workArea.width - width - EDGE_PADDING_DIP
+  if (maxX <= minX) {
+    return workArea.x
   }
-  return {
-    x: Math.round(point.x / scaleFactor),
-    y: Math.round(point.y / scaleFactor)
+  if (desiredX < minX) {
+    return minX
   }
+  if (desiredX > maxX) {
+    return maxX
+  }
+  return desiredX
 }
 
-function clampAxis(desired: number, length: number, minBound: number, maxBound: number): number {
-  const minAllowed = minBound + EDGE_PADDING_DIP
-  const maxAllowed = maxBound - length - EDGE_PADDING_DIP
-  if (maxAllowed <= minAllowed) {
-    return minBound
+function resolveVertical(anchorY: number, height: number, workArea: Rect): number {
+  const minY = workArea.y + EDGE_PADDING_DIP
+  const maxY = workArea.y + workArea.height - height - EDGE_PADDING_DIP
+  if (maxY <= minY) {
+    return workArea.y
   }
-  if (desired < minAllowed) {
-    return minAllowed
+  const belowY = anchorY + OFFSET_Y_BELOW_DIP
+  if (belowY <= maxY) {
+    return Math.max(minY, belowY)
   }
-  if (desired > maxAllowed) {
-    return maxAllowed
+  const aboveY = anchorY - height - OFFSET_Y_ABOVE_DIP
+  if (aboveY >= minY) {
+    return aboveY
   }
-  return desired
+  return maxY
 }
 
 export function computePopupPosition(
-  physicalAnchor: Point,
+  dipAnchor: Point,
   popupSize: Size,
-  display: DisplayMetrics
+  workArea: Rect
 ): Point {
-  const dip = physicalToDip(physicalAnchor, display.scaleFactor)
-  const { workArea } = display
   return {
-    x: clampAxis(dip.x + CURSOR_OFFSET_DIP, popupSize.width, workArea.x, workArea.x + workArea.width),
-    y: clampAxis(dip.y + CURSOR_OFFSET_DIP, popupSize.height, workArea.y, workArea.y + workArea.height)
+    x: clampHorizontal(Math.round(dipAnchor.x) + OFFSET_X_DIP, popupSize.width, workArea),
+    y: resolveVertical(Math.round(dipAnchor.y), popupSize.height, workArea)
   }
 }

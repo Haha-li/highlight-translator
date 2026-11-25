@@ -41,13 +41,9 @@ export interface Size {
   height: number
 }
 
-export interface DisplayMetrics {
-  workArea: Rect
-  scaleFactor: number
-}
-
 export interface SelectionPayload {
   text: string
+  /** Screen position in Electron logical DIP coordinates */
   anchor: Point
   programName: string
 }

@@ -1,26 +1,33 @@
-import React from 'react'
-import { createRoot } from 'react-dom/client'
+import { resolveEffectiveTheme } from '../../../shared/theme'
+import type { ThemeMode } from '../../../shared/types'
 import '../styles/common.css'
-import { useTheme } from '../styles/useTheme'
 
-function ToolbarApp(): React.JSX.Element {
-  useTheme()
+let currentMode: ThemeMode = 'system'
+const darkMedia = window.matchMedia('(prefers-color-scheme: dark)')
 
-  const handleTrigger = (ev: React.MouseEvent): void => {
-    ev.preventDefault()
-    ev.stopPropagation()
-    window.translatorApi.triggerTranslateFromToolbar()
-  }
+function syncToolbarTheme(): void {
+  document.documentElement.dataset.theme = resolveEffectiveTheme(currentMode, darkMedia.matches)
+}
 
-  return (
-    <div className="toolbar-wrap">
-      <button
-        type="button"
-        className="toolbar-btn"
-        title="翻译选中文本"
-        onMouseDown={handleTrigger}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+syncToolbarTheme()
+darkMedia.addEventListener('change', syncToolbarTheme)
+
+void window.translatorApi.getConfig().then((cfg) => {
+  currentMode = cfg.theme
+  syncToolbarTheme()
+})
+
+window.translatorApi.onConfigUpdated((cfg) => {
+  currentMode = cfg.theme
+  syncToolbarTheme()
+})
+
+const root = document.getElementById('root')
+if (root) {
+  root.innerHTML = `
+    <div class="toolbar-wrap">
+      <button type="button" class="toolbar-btn" title="翻译选中文本" id="trigger-btn">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="m5 8 6 6" />
           <path d="m4 14 6-6 2-3" />
           <path d="M2 5h12" />
@@ -30,10 +37,13 @@ function ToolbarApp(): React.JSX.Element {
         </svg>
       </button>
     </div>
-  )
-}
-
-const container = document.getElementById('root')
-if (container) {
-  createRoot(container).render(<ToolbarApp />)
+  `
+  const btn = document.getElementById('trigger-btn')
+  if (btn) {
+    btn.addEventListener('mousedown', (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      window.translatorApi.triggerTranslateFromToolbar()
+    })
+  }
 }

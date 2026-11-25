@@ -10,19 +10,34 @@ export interface SelectionServiceDeps {
   windows: WindowManager
 }
 
-function resolvePhysicalAnchor(data: TextSelectionData): Point {
+function toDipIfValid(raw: Point): Point | null {
   if (
-    data.mousePosEnd.x !== SelectionHook.INVALID_COORDINATE &&
-    data.mousePosEnd.y !== SelectionHook.INVALID_COORDINATE
+    raw.x === SelectionHook.INVALID_COORDINATE ||
+    raw.y === SelectionHook.INVALID_COORDINATE ||
+    (raw.x === 0 && raw.y === 0)
   ) {
-    return data.mousePosEnd
+    return null
   }
-  const cursorDip = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(cursorDip)
-  return {
-    x: Math.round(cursorDip.x * display.scaleFactor),
-    y: Math.round(cursorDip.y * display.scaleFactor)
+  if (process.platform === 'darwin') {
+    return { x: raw.x, y: raw.y }
   }
+  return screen.screenToDipPoint({ x: raw.x, y: raw.y })
+}
+
+function resolveSelectionDipAnchor(data: TextSelectionData): Point {
+  if (data.posLevel !== SelectionHook.PositionLevel.NONE) {
+    const mouseEnd = toDipIfValid(data.mousePosEnd)
+    if (mouseEnd) {
+      return mouseEnd
+    }
+    if (data.posLevel >= SelectionHook.PositionLevel.SEL_FULL) {
+      const endBottom = toDipIfValid(data.endBottom)
+      if (endBottom) {
+        return endBottom
+      }
+    }
+  }
+  return screen.getCursorScreenPoint()
 }
 
 export class SelectionService {
@@ -61,7 +76,9 @@ export class SelectionService {
     })
 
     this.hook.on('mouse-down', (ev) => {
-      if (this.windows.isPointInsideToolbar({ x: ev.x, y: ev.y })) {
+      const dip = toDipIfValid({ x: ev.x, y: ev.y })
+      const checkPoint = dip ? dip : screen.getCursorScreenPoint()
+      if (this.windows.isDipPointInsideToolbar(checkPoint)) {
         return
       }
       this.windows.hideToolbar()
@@ -96,7 +113,7 @@ export class SelectionService {
 
     const payload: SelectionPayload = {
       text: data.text.trim(),
-      anchor: resolvePhysicalAnchor(data),
+      anchor: resolveSelectionDipAnchor(data),
       programName: data.programName
     }
 
@@ -170,14 +187,9 @@ export class SelectionService {
       return
     }
 
-    const cursorDip = screen.getCursorScreenPoint()
-    const display = screen.getDisplayNearestPoint(cursorDip)
     const anchor: Point = current
-      ? resolvePhysicalAnchor(current)
-      : {
-          x: Math.round(cursorDip.x * display.scaleFactor),
-          y: Math.round(cursorDip.y * display.scaleFactor)
-        }
+      ? resolveSelectionDipAnchor(current)
+      : screen.getCursorScreenPoint()
 
     this.windows.openTranslate({
       text: trimmed,

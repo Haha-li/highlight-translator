@@ -1,10 +1,13 @@
 import { Menu, Tray, nativeImage, type NativeImage } from 'electron'
+import type { UpdateMenuItem } from '../shared/update'
 
 export interface TrayActions {
   isEnabled: () => boolean
   onToggleEnabled: (next: boolean) => void
   onManualTranslate: () => void
   onOpenSettings: () => void
+  getUpdateMenu: () => UpdateMenuItem
+  onUpdateClick: () => void
   onQuit: () => void
 }
 
@@ -55,6 +58,7 @@ export class AppTray {
       return
     }
     const enabled = this.actions.isEnabled()
+    const updateItem = this.actions.getUpdateMenu()
     const menu = Menu.buildFromTemplate([
       {
         label: '启用划词翻译',
@@ -77,6 +81,13 @@ export class AppTray {
           this.actions.onOpenSettings()
         }
       },
+      {
+        label: updateItem.label,
+        enabled: updateItem.enabled,
+        click: () => {
+          this.actions.onUpdateClick()
+        }
+      },
       { type: 'separator' },
       {
         label: '退出',
@@ -86,6 +97,13 @@ export class AppTray {
       }
     ])
     this.tray.setContextMenu(menu)
+  }
+
+  public notify(title: string, content: string): void {
+    if (!this.tray) {
+      return
+    }
+    this.tray.displayBalloon({ title, content, iconType: 'info' })
   }
 
   public destroy(): void {

@@ -48,4 +48,6 @@ jobs:
           generate_release_notes: true
           files: |
             dist/HighlightTranslator-Setup-*.exe
+            dist/HighlightTranslator-Setup-*.exe.blockmap
+            dist/latest.yml
             dist/HighlightTranslator-Portable-*-win64.zip

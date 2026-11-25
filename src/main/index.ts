@@ -7,13 +7,20 @@ import {
   type TranslateRequest,
   type TranslatorConfig
 } from '../shared/types'
+import { describeUpdateMenu } from '../shared/update'
 import { SelectionService } from './selectionService'
 import { ConfigStore } from './store'
 import { TranslatorEngine } from './translator'
 import { AppTray } from './tray'
+import { AppUpdater } from './updater'
 import { WindowManager } from './windows'
 
 const isSmokeTest = process.argv.includes('--smoke-test')
+
+// Eliminate dedicated GPU process (~32MB) and share a single capped V8 renderer process
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('renderer-process-limit', '1')
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=48')
 
 interface AppRuntime {
   store: ConfigStore
@@ -92,6 +99,10 @@ function bootstrap(): void {
     translator.abortCurrent()
   })
   const selection = new SelectionService({ store, windows })
+  const updater = new AppUpdater({
+    onStateChange: () => tray.refreshMenu(),
+    onNotify: (title, content) => tray.notify(title, content)
+  })
   const tray = new AppTray({
     isEnabled: () => store.get().enabled,
     onToggleEnabled: (next) => {
@@ -103,15 +114,19 @@ function bootstrap(): void {
     },
     onManualTranslate: () => selection.triggerManualTranslate(),
     onOpenSettings: () => windows.openSettings(),
+    getUpdateMenu: () => describeUpdateMenu(updater.getState(), app.getVersion()),
+    onUpdateClick: () => updater.handleMenuClick(),
     onQuit: () => app.quit()
   })
 
   registerIpcHandlers({ store, windows, translator, selection, tray })
-  windows.warmUpFloatingWindows()
   tray.init()
   const startRes = selection.start()
   if (!startRes.ok) {
     console.error('[Main] Selection hook startup warning:', startRes.error)
+  }
+  if (!isSmokeTest) {
+    updater.start()
   }
 
   // First launch without API key opens settings so user knows app is running
@@ -120,6 +135,7 @@ function bootstrap(): void {
   }
 
   app.on('will-quit', () => {
+    updater.dispose()
     translator.abortCurrent()
     selection.dispose()
     tray.destroy()
